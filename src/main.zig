@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     const epub = try Epub.open(&reader, allocator);
-    std.debug.print("{}", .{epub.tmp()});
+    std.debug.print("{any}", .{epub.metadata});
 }
 
 test "simple test" {

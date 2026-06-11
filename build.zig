@@ -140,6 +140,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    const xmlz = b.dependency("xmlz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("xml", xmlz.module("xml"));
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

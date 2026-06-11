@@ -1,14 +1,10 @@
 const Epub = @This();
 
 const std = @import("std");
+const xml = @import("xml");
 
 reader: *std.Io.File.Reader,
-foo: u1 = 1,
-
-// TODO remove
-pub fn tmp(e: Epub) u1 {
-    return e.foo;
-}
+metadata: Metadata,
 
 const container_filename = "META-INF/container.xml";
 const mime_filename = "mimetype";
@@ -20,6 +16,14 @@ pub const EpubError = error{
     EpubDoesNotHaveContainerXMLFile,
     EpubWrongFormat,
     EpubFileNotFound,
+};
+
+pub const Metadata = struct {
+    title: []const u8,
+    // language and identifier should be mandatory like title
+    language: ?[]const u8 = null,
+    identifier: ?[]const u8 = null,
+    creator: ?[]const u8 = null,
 };
 
 pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
@@ -54,10 +58,61 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     // Open .../content.opf file and parse
     const content_entry = try getEntryByFilename(reader, opf_path, allocator);
     const content_content = try decompressEntryToMemory(reader, content_entry, allocator);
+    var content_xml: xml = .{ .buffer = content_content };
 
-    std.debug.print("{s}", .{content_content});
+    // get metadata
+    var metadata: Metadata = .{
+        .title = undefined,
+        .language = null,
+        .identifier = null,
+        .creator = null,
+    };
+    var title: ?[]const u8 = null;
+    // const language: ?[]const u8 = null;
+    // const identifier: ?[]const u8 = null;
+    // const creaator: ?[]const u8 = null;
+    while (true) {
+        const token = content_xml.next() catch |err| switch (err) {
+            error.BufferUnderrun => break,
+            else => return err,
+        };
+        switch (token) {
+            .tag_open => |tag_open_name| {
+                // std.debug.print("{s}\n", .{tag_name});
+                if (std.mem.eql(u8, "metadata", tag_open_name)) {
+                    while (true) {
+                        const manifest_token = try content_xml.next();
+                        switch (manifest_token) {
+                            .tag_close => |tag_close_name| {
+                                if (std.mem.eql(u8, "manifest", tag_close_name)) {
+                                    metadata.title = title orelse return error.MissingTitle;
+                                    break;
+                                }
+                            },
+                            .tag_open => |manifest_tag_name| {
+                                if (std.mem.eql(u8, "dc:title", manifest_tag_name)) {
+                                    while (true) {
+                                        const title_token = try content_xml.next();
+                                        switch (title_token) {
+                                            .content => |title_content| {
+                                                title = title_content;
+                                                break;
+                                            },
+                                            else => {},
+                                        }
+                                    }
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                }
+            },
+            else => {},
+        }
+    }
 
-    return Epub{ .reader = reader };
+    return Epub{ .reader = reader, .metadata = metadata };
 }
 
 fn getFilenameFromEntry(reader: *std.Io.File.Reader, entry: std.zip.Iterator.Entry, allocator: std.mem.Allocator) ![]u8 {
