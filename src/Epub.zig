@@ -20,9 +20,8 @@ pub const EpubError = error{
 
 pub const Metadata = struct {
     title: []const u8,
-    // language and identifier should be mandatory like title
-    language: ?[]const u8 = null,
-    identifier: ?[]const u8 = null,
+    language: []const u8,
+    identifier: []const u8,
     creator: ?[]const u8 = null,
 };
 
@@ -61,16 +60,10 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     var content_xml: xml = .{ .buffer = content_content };
 
     // get metadata
-    var metadata: Metadata = .{
-        .title = undefined,
-        .language = null,
-        .identifier = null,
-        .creator = null,
-    };
     var title: ?[]const u8 = null;
-    // const language: ?[]const u8 = null;
-    // const identifier: ?[]const u8 = null;
-    // const creaator: ?[]const u8 = null;
+    var language: ?[]const u8 = null;
+    var identifier: ?[]const u8 = null;
+    var creator: ?[]const u8 = null;
     while (true) {
         const token = content_xml.next() catch |err| switch (err) {
             error.BufferUnderrun => break,
@@ -81,25 +74,37 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                 // std.debug.print("{s}\n", .{tag_name});
                 if (std.mem.eql(u8, "metadata", tag_open_name)) {
                     while (true) {
-                        const manifest_token = try content_xml.next();
-                        switch (manifest_token) {
+                        const metadata_token = try content_xml.next();
+                        switch (metadata_token) {
                             .tag_close => |tag_close_name| {
-                                if (std.mem.eql(u8, "manifest", tag_close_name)) {
-                                    metadata.title = title orelse return error.MissingTitle;
+                                if (std.mem.eql(u8, "metadata", tag_close_name)) {
                                     break;
                                 }
                             },
-                            .tag_open => |manifest_tag_name| {
-                                if (std.mem.eql(u8, "dc:title", manifest_tag_name)) {
-                                    while (true) {
-                                        const title_token = try content_xml.next();
-                                        switch (title_token) {
-                                            .content => |title_content| {
-                                                title = title_content;
-                                                break;
-                                            },
-                                            else => {},
-                                        }
+                            .tag_open => |metadata_tag_name| {
+                                if (std.mem.eql(u8, "dc:title", metadata_tag_name)) {
+                                    const title_token = try content_xml.nextContent();
+                                    switch (title_token) {
+                                        .content => |title_content| title = title_content,
+                                        else => unreachable,
+                                    }
+                                } else if (std.mem.eql(u8, "dc:language", metadata_tag_name)) {
+                                    const language_token = try content_xml.nextContent();
+                                    switch (language_token) {
+                                        .content => |language_content| language = language_content,
+                                        else => unreachable,
+                                    }
+                                } else if (std.mem.eql(u8, "dc:identifier", metadata_tag_name)) {
+                                    const identifier_token = try content_xml.nextContent();
+                                    switch (identifier_token) {
+                                        .content => |identifier_content| identifier = identifier_content,
+                                        else => unreachable,
+                                    }
+                                } else if (std.mem.eql(u8, "dc:creator", metadata_tag_name)) {
+                                    const creator_token = try content_xml.nextContent();
+                                    switch (creator_token) {
+                                        .content => |creator_content| creator = creator_content,
+                                        else => unreachable,
                                     }
                                 }
                             },
@@ -112,7 +117,12 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
         }
     }
 
-    return Epub{ .reader = reader, .metadata = metadata };
+    return Epub{ .reader = reader, .metadata = .{
+        .title = title orelse return error.TitleMissing,
+        .language = language orelse return error.LanguageMissing,
+        .identifier = identifier orelse return error.IdentifierMissing,
+        .creator = creator,
+    } };
 }
 
 fn getFilenameFromEntry(reader: *std.Io.File.Reader, entry: std.zip.Iterator.Entry, allocator: std.mem.Allocator) ![]u8 {
