@@ -31,6 +31,7 @@ pub const ManifestItem = struct {
     id: []const u8,
     href: []const u8,
     media_type: []const u8,
+    properties: ?[]const u8 = null,
 };
 
 pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
@@ -131,6 +132,7 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                                     var id: ?[]const u8 = null;
                                     var href: ?[]const u8 = null;
                                     var media_type: ?[]const u8 = null;
+                                    var properties: ?[]const u8 = null;
                                     while (true) {
                                         const item_token = try content_xml.next();
                                         switch (item_token) {
@@ -144,6 +146,8 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                                                             href = value;
                                                         } else if (std.mem.eql(u8, "media-type", key)) {
                                                             media_type = value;
+                                                        } else if (std.mem.eql(u8, "properties", key)) {
+                                                            properties = value;
                                                         }
                                                     },
                                                     else => unreachable,
@@ -154,6 +158,7 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                                                     .id = id orelse return error.ItemIdMissing,
                                                     .href = href orelse return error.ItemHrefMissing,
                                                     .media_type = media_type orelse return error.ItemMediaTypeMissing,
+                                                    .properties = properties,
                                                 });
                                                 break;
                                             },
