@@ -17,6 +17,7 @@ pub fn main(init: std.process.Init) !void {
 
     const epub = try Epub.open(&reader, allocator);
     std.debug.print("{any}", .{epub.metadata});
+    std.debug.print("{any}", .{epub.manifest});
 }
 
 test "simple test" {
