@@ -4,6 +4,7 @@ const std = @import("std");
 const xml = @import("xml");
 
 reader: *std.Io.File.Reader,
+opf_buffer: []const u8,
 metadata: Metadata,
 manifest: std.ArrayList(ManifestItem) = .empty,
 spine: std.ArrayList(*const ManifestItem) = .empty,
@@ -34,19 +35,22 @@ pub const ManifestItem = struct {
     properties: ?[]const u8 = null,
 };
 
-pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
+pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     var iter = try std.zip.Iterator.init(reader);
     const first = try iter.next() orelse return EpubError.EpubHasNoFiles;
 
     // First file must be mimetype with application/epub+zip.
     const first_filename = try getFilenameFromEntry(reader, first, allocator);
+    defer allocator.free(first_filename);
     if (!std.mem.eql(u8, first_filename, mime_filename)) return EpubError.EpubFirstFileIsNotMimetype;
     const first_content = try decompressEntryToMemory(reader, first, allocator);
+    defer allocator.free(first_content);
     if (!std.mem.eql(u8, first_content, mime_type)) return EpubError.EpubWrongFormat;
 
     // No need to parse container file. Just finding full path is faster.
     const container_entry = try getEntryByFilename(reader, container_filename, allocator);
     const container_content = try decompressEntryToMemory(reader, container_entry, allocator);
+    defer allocator.free(container_content);
 
     const needle = "full-path=\"";
     var opf_path: []u8 = undefined;
@@ -57,9 +61,9 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
         }
     }
 
-    const content_entry = try getEntryByFilename(reader, opf_path, allocator);
-    const content_content = try decompressEntryToMemory(reader, content_entry, allocator);
-    var content_xml: xml = .{ .buffer = content_content };
+    const opf_entry = try getEntryByFilename(reader, opf_path, allocator);
+    const opf_content = try decompressEntryToMemory(reader, opf_entry, allocator);
+    var content_xml: xml = .{ .buffer = opf_content };
 
     var title: ?[]const u8 = null;
     var language: ?[]const u8 = null;
@@ -204,6 +208,7 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
 
     return .{
         .reader = reader,
+        .opf_buffer = opf_content,
         .metadata = .{
             .title = title orelse return error.TitleMissing,
             .language = language orelse return error.LanguageMissing,
@@ -215,6 +220,15 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     };
 }
 
+pub fn deinit(epub: *Epub, allocator: std.mem.Allocator) void {
+    epub.manifest.deinit(allocator);
+    epub.spine.deinit(allocator);
+    allocator.free(epub.opf_buffer);
+}
+
+// TODO Might make sense to switch to a stack buffer instead of allocating.
+// If we go with that, we need to be careful with the size. Linux max path size is 4KB
+// and freeRTOS stack size is 8KB.
 fn getFilenameFromEntry(reader: *std.Io.File.Reader, entry: std.zip.Iterator.Entry, allocator: std.mem.Allocator) ![]u8 {
     const buffer = try allocator.alloc(u8, entry.filename_len);
     try reader.seekTo(entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader));
@@ -247,7 +261,18 @@ fn getEntryByFilename(reader: *std.Io.File.Reader, filename: []const u8, allocat
     var iterator = try std.zip.Iterator.init(reader);
     while (try iterator.next()) |entry| {
         const entry_name = try getFilenameFromEntry(reader, entry, allocator);
+        defer allocator.free(entry_name);
         if (std.mem.eql(u8, filename, entry_name)) return entry;
     }
     return EpubError.EpubFileNotFound;
+}
+
+test "test init deinit" {
+    const io = std.testing.io;
+    var file = try std.Io.Dir.cwd().openFile(io, "testdata/pg215-images-3.epub", .{});
+    defer file.close(io);
+    var buf: [512]u8 = undefined;
+    var reader = file.reader(io, &buf);
+    var epub = try Epub.init(&reader, std.testing.allocator);
+    epub.deinit(std.testing.allocator);
 }
