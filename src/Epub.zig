@@ -6,6 +6,7 @@ const xml = @import("xml");
 reader: *std.Io.File.Reader,
 metadata: Metadata,
 manifest: std.ArrayList(ManifestItem) = .empty,
+spine: std.ArrayList(*const ManifestItem) = .empty,
 
 const container_filename = "META-INF/container.xml";
 const mime_filename = "mimetype";
@@ -66,9 +67,8 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
 
     var manifest: std.ArrayList(ManifestItem) = .empty;
 
-    // This is a very optimistic way to parse.
-    // For example, we assume that in the manifest section, every item will have
-    // an id and href.
+    var spine: std.ArrayList(*const ManifestItem) = .empty;
+
     while (true) {
         const token = content_xml.next() catch |err| switch (err) {
             error.BufferUnderrun => break,
@@ -165,6 +165,32 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                             else => {},
                         }
                     }
+                    // Parse spine.
+                } else if (std.mem.eql(u8, "spine", tag_open_name)) {
+                    while (true) {
+                        const spine_token = try content_xml.next();
+                        switch (spine_token) {
+                            .tag_close => |tag_close_name| {
+                                if (std.mem.eql(u8, "spine", tag_close_name)) {
+                                    break;
+                                }
+                            },
+                            .attr_key => |key| {
+                                if (std.mem.eql(u8, "idref", key)) {
+                                    const value_token = try content_xml.next();
+                                    switch (value_token) {
+                                        .attr_value => |id| {
+                                            for (manifest.items) |*item| {
+                                                if (std.mem.eql(u8, item.id, id)) try spine.append(allocator, item);
+                                            }
+                                        },
+                                        else => unreachable,
+                                    }
+                                }
+                            },
+                            else => {},
+                        }
+                    }
                 }
             },
             else => {},
@@ -180,6 +206,7 @@ pub fn open(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
             .creator = creator,
         },
         .manifest = manifest,
+        .spine = spine,
     };
 }
 
