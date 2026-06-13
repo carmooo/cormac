@@ -20,4 +20,6 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("{any}", .{epub.metadata});
     std.debug.print("{any}", .{epub.manifest.items.len});
     std.debug.print("{any}", .{epub.spine.items.len});
+    const open = try epub.open(2, allocator);
+    std.debug.print("{s}", .{open});
 }

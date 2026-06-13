@@ -5,9 +5,11 @@ const xml = @import("xml");
 
 reader: *std.Io.File.Reader,
 opf_buffer: []const u8,
+opf_dir: []const u8,
 metadata: Metadata,
 manifest: std.ArrayList(ManifestItem) = .empty,
 spine: std.ArrayList(*const ManifestItem) = .empty,
+spine_index: usize = 0,
 
 const container_filename = "META-INF/container.xml";
 const mime_filename = "mimetype";
@@ -50,17 +52,24 @@ pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     const container_content = try decompressEntryToMemory(reader, container_entry, allocator);
     defer allocator.free(container_content);
 
-    const needle = "full-path=\"";
-    var opf_path: []u8 = undefined;
-    if (std.mem.indexOf(u8, container_content, needle)) |start| {
+    const opf_path = blk: {
+        const needle = "full-path=\"";
+        const start = std.mem.indexOf(u8, container_content, needle) orelse return error.EpubMissingOpfPath;
         const path_start = start + needle.len;
-        if (std.mem.indexOfScalar(u8, container_content[path_start..], '"')) |end| {
-            opf_path = container_content[path_start .. path_start + end];
-        }
-    }
+        const end = std.mem.indexOfScalar(u8, container_content[path_start..], '"') orelse return error.EpubMissingOpfPath;
+        break :blk container_content[path_start .. path_start + end];
+    };
+
+    const opf_dir = if (std.mem.lastIndexOfScalar(u8, opf_path, '/')) |i|
+        opf_path[0 .. i + 1]
+    else
+        "";
+    const opf_dir_duped = try allocator.dupe(u8, opf_dir);
+    errdefer allocator.free(opf_dir_duped);
 
     const opf_entry = try getEntryByFilename(reader, opf_path);
     const opf_content = try decompressEntryToMemory(reader, opf_entry, allocator);
+    errdefer allocator.free(opf_content);
     var content_xml: xml = .{ .buffer = opf_content };
 
     var title: ?[]const u8 = null;
@@ -207,6 +216,7 @@ pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     return .{
         .reader = reader,
         .opf_buffer = opf_content,
+        .opf_dir = opf_dir_duped,
         .metadata = .{
             .title = title orelse return error.TitleMissing,
             .language = language orelse return error.LanguageMissing,
@@ -224,6 +234,15 @@ pub fn deinit(epub: *Epub, allocator: std.mem.Allocator) void {
     allocator.free(epub.opf_buffer);
 }
 
+pub fn open(epub: *Epub, spine_index: usize, allocator: std.mem.Allocator) ![]const u8 {
+    const item = epub.spine.items[spine_index];
+    const filename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ epub.opf_dir, item.href[1 .. item.href.len - 1] });
+    defer allocator.free(filename);
+    std.debug.print("{s}", .{filename});
+    const entry = try getEntryByFilename(epub.reader, filename);
+    return try decompressEntryToMemory(epub.reader, entry, allocator);
+}
+
 fn entryHasFilename(reader: *std.Io.File.Reader, entry: std.zip.Iterator.Entry, filename: []const u8) !bool {
     // limits the name to 256 but this way we do not need an allocator
     var buffer: [256]u8 = undefined;
@@ -239,6 +258,7 @@ fn decompressEntryToMemory(reader: *std.Io.File.Reader, entry: std.zip.Iterator.
     try reader.seekBy(local_header.filename_len + local_header.extra_len);
 
     const buffer = try allocator.alloc(u8, entry.uncompressed_size);
+    errdefer allocator.free(buffer);
     switch (entry.compression_method) {
         .store => {
             try reader.interface.readSliceAll(buffer);
@@ -249,7 +269,7 @@ fn decompressEntryToMemory(reader: *std.Io.File.Reader, entry: std.zip.Iterator.
             var writer = std.Io.Writer.fixed(buffer);
             _ = try decompress.reader.streamRemaining(&writer);
         },
-        else => {},
+        else => return error.UnsupportedCompression,
     }
     return buffer;
 }
