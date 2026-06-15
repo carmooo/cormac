@@ -42,7 +42,8 @@ pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
     const first = try iter.next() orelse return EpubError.EpubHasNoFiles;
 
     // First file must be mimetype with application/epub+zip.
-    if (!try entryHasFilename(reader, first, mime_filename)) return EpubError.EpubFirstFileIsNotMimetype;
+    if (!try entryHasFilename(reader, first, mime_filename))
+        return EpubError.EpubFirstFileIsNotMimetype;
     const first_content = try decompressEntryToMemory(reader, first, allocator);
     defer allocator.free(first_content);
     if (!std.mem.eql(u8, first_content, mime_type)) return EpubError.EpubWrongFormat;
@@ -54,9 +55,14 @@ pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
 
     const opf_path = blk: {
         const needle = "full-path=\"";
-        const start = std.mem.indexOf(u8, container_content, needle) orelse return error.EpubMissingOpfPath;
+        const start = std.mem.indexOf(u8, container_content, needle) orelse
+            return error.EpubMissingOpfPath;
         const path_start = start + needle.len;
-        const end = std.mem.indexOfScalar(u8, container_content[path_start..], '"') orelse return error.EpubMissingOpfPath;
+        const end = std.mem.indexOfScalar(
+            u8,
+            container_content[path_start..],
+            '"',
+        ) orelse return error.EpubMissingOpfPath;
         break :blk container_content[path_start .. path_start + end];
     };
 
@@ -168,7 +174,8 @@ pub fn init(reader: *std.Io.File.Reader, allocator: std.mem.Allocator) !Epub {
                                                 try manifest.append(allocator, .{
                                                     .id = id orelse return error.ItemIdMissing,
                                                     .href = href orelse return error.ItemHrefMissing,
-                                                    .media_type = media_type orelse return error.ItemMediaTypeMissing,
+                                                    .media_type = media_type orelse
+                                                        return error.ItemMediaTypeMissing,
                                                     .properties = properties,
                                                 });
                                                 break;
