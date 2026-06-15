@@ -245,7 +245,6 @@ pub fn open(epub: *Epub, spine_index: usize, allocator: std.mem.Allocator) ![]co
     const item = epub.spine.items[spine_index];
     const filename = try std.fmt.allocPrint(allocator, "{s}{s}", .{ epub.opf_dir, item.href[1 .. item.href.len - 1] });
     defer allocator.free(filename);
-    std.debug.print("{s}", .{filename});
     const entry = try getEntryByFilename(epub.reader, filename);
     return try decompressEntryToMemory(epub.reader, entry, allocator);
 }

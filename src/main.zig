@@ -1,5 +1,6 @@
 const std = @import("std");
 const Epub = @import("Epub.zig");
+const xml = @import("xml");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -17,9 +18,19 @@ pub fn main(init: std.process.Init) !void {
 
     var epub = try Epub.init(&reader, allocator);
     defer epub.deinit(allocator);
-    std.debug.print("{any}", .{epub.metadata});
-    std.debug.print("{any}", .{epub.manifest.items.len});
-    std.debug.print("{any}", .{epub.spine.items.len});
-    const open = try epub.open(2, allocator);
-    std.debug.print("{s}", .{open});
+    const open = try epub.open(3, allocator);
+    std.debug.print("{s}\n", .{open[0..1000]});
+
+    var chapter: xml = .{ .buffer = open };
+
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        const c = try chapter.nextContent();
+        switch (c) {
+            .content => |text| {
+                std.debug.print("{s}\n", .{text});
+            },
+            else => unreachable,
+        }
+    }
 }
